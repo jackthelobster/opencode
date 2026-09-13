@@ -2,6 +2,9 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Context, Effect, Layer } from "effect"
 
 import { InstanceState } from "@/effect/instance-state"
+import fs from "fs"
+import os from "os"
+import path from "path"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
@@ -25,7 +28,32 @@ import { Reference } from "@opencode-ai/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
+// A user-authored SYSTEM.md completely replaces the bundled per-provider prompt.
+// Searched in ~/.opencode first (as documented to users), then the XDG config
+// dir (~/.config/opencode) so both conventions work.
+// The XDG path is computed from the env at call time (mirroring xdg-basedir)
+// instead of Global.Path.config, which is snapshotted once at import.
+function customPrompt(): string | undefined {
+  const home = process.env.OPENCODE_TEST_HOME ?? os.homedir()
+  const xdgConfig = process.env.XDG_CONFIG_HOME ?? path.join(home, ".config")
+  const candidates = [
+    path.join(home, ".opencode", "SYSTEM.md"),
+    path.join(xdgConfig, "opencode", "SYSTEM.md"),
+  ]
+  for (const candidate of candidates) {
+    try {
+      const content = fs.readFileSync(candidate, "utf8")
+      if (content.trim().length > 0) return content
+    } catch {
+      // missing/unreadable file -> fall through to the next candidate
+    }
+  }
+  return undefined
+}
+
 export function provider(model: Provider.Model) {
+  const override = customPrompt()
+  if (override) return [override]
   if (model.api.id.includes("muse")) {
     const name = model.api.id.includes("muse-glimmer") ? "Muse Glimmer" : "Muse Spark"
     return [PROMPT_META.replaceAll("{{MODEL_NAME}}", name)]
